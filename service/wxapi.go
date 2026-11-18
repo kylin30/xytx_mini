@@ -49,6 +49,18 @@ func postWx(path string, body interface{}) (*http.Response, []byte, error) {
 	return resp, data, nil
 }
 
+// snippet 截取返回原文的开头，用于报错（这两个接口出错时的返回里没有手机号等敏感内容）
+func snippet(data []byte) string {
+	s := strings.TrimSpace(string(data))
+	if len(s) > 300 {
+		s = s[:300] + "…"
+	}
+	if s == "" {
+		return "（空）"
+	}
+	return s
+}
+
 // getUnlimitedQRCode 生成小程序码（不限数量），scene 最多 32 个字符。
 // 成功时微信直接返回图片；失败时返回 JSON 错误。
 func getUnlimitedQRCode(scene, page, envVersion string) ([]byte, string, error) {
@@ -70,7 +82,7 @@ func getUnlimitedQRCode(scene, page, envVersion string) ([]byte, string, error) 
 	if json.Unmarshal(data, &we) == nil && we.ErrCode != 0 {
 		return nil, "", &we
 	}
-	return nil, "", fmt.Errorf("生成小程序码返回了无法识别的内容（HTTP %d，Content-Type=%s）", resp.StatusCode, contentType)
+	return nil, "", fmt.Errorf("生成小程序码返回了无法识别的内容（HTTP %d，Content-Type=%s）：%s", resp.StatusCode, contentType, snippet(data))
 }
 
 type wxPhoneInfo struct {
@@ -94,7 +106,7 @@ func getUserPhoneNumber(code string) (*wxPhoneInfo, error) {
 		PhoneInfo *wxPhoneInfo `json:"phone_info"`
 	}
 	if err := json.Unmarshal(data, &res); err != nil {
-		return nil, fmt.Errorf("换手机号返回的内容不是 JSON：%v", err)
+		return nil, fmt.Errorf("换手机号返回的内容不是 JSON：%s", snippet(data))
 	}
 	if res.ErrCode != 0 {
 		return nil, &res.wxError
