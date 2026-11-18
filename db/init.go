@@ -1,60 +1,88 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
+	"github.com/go-sql-driver/mysql"
 )
 
-var dbInstance *gorm.DB
+var dbInstance *sql.DB
 
-// Init 初始化数据库
+var dbNameRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// Init 连接云托管 MySQL（环境变量沿用模板：MYSQL_ADDRESS、MYSQL_USERNAME、MYSQL_PASSWORD、MYSQL_DATABASE），
+// 库和表不存在时自动建。
 func Init() error {
-
-	source := "%s:%s@tcp(%s)/%s?readTimeout=1500ms&writeTimeout=1500ms&charset=utf8&loc=Local&&parseTime=true"
-	user := os.Getenv("MYSQL_USERNAME")
-	pwd := os.Getenv("MYSQL_PASSWORD")
-	addr := os.Getenv("MYSQL_ADDRESS")
 	dataBase := os.Getenv("MYSQL_DATABASE")
 	if dataBase == "" {
-		dataBase = "golang_demo"
+		dataBase = "xytx_mini"
 	}
-	source = fmt.Sprintf(source, user, pwd, addr, dataBase)
-	fmt.Println("start init mysql with ", source)
+	if !dbNameRe.MatchString(dataBase) {
+		return fmt.Errorf("MYSQL_DATABASE 只能包含字母、数字、下划线")
+	}
 
-	db, err := gorm.Open(mysql.Open(source), &gorm.Config{
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true, // use singular table name, table for `User` would be `user` with this option enabled
-		}})
+	cfg := mysql.NewConfig()
+	cfg.Net = "tcp"
+	cfg.Addr = os.Getenv("MYSQL_ADDRESS")
+	cfg.User = os.Getenv("MYSQL_USERNAME")
+	cfg.Passwd = os.Getenv("MYSQL_PASSWORD")
+	cfg.Timeout = 3 * time.Second
+	cfg.ReadTimeout = 3 * time.Second
+	cfg.WriteTimeout = 3 * time.Second
+	cfg.ParseTime = true
+	cfg.Loc = time.UTC
+	cfg.Params = map[string]string{"charset": "utf8mb4", "time_zone": "'+00:00'"}
+
+	// 先不指定库连一次，把库建出来
+	boot, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
-		fmt.Println("DB Open error,err=", err.Error())
 		return err
 	}
-
-	sqlDB, err := db.DB()
+	_, err = boot.Exec("CREATE DATABASE IF NOT EXISTS `" + dataBase + "` DEFAULT CHARSET utf8mb4")
+	boot.Close()
 	if err != nil {
-		fmt.Println("DB Init error,err=", err.Error())
-		return err
+		return fmt.Errorf("建库 %s 失败：%v", dataBase, err)
 	}
 
-	// 用于设置连接池中空闲连接的最大数量
-	sqlDB.SetMaxIdleConns(100)
-	// 设置打开数据库连接的最大数量
-	sqlDB.SetMaxOpenConns(200)
-	// 设置了连接可复用的最大时间
-	sqlDB.SetConnMaxLifetime(time.Hour)
-
+	cfg.DBName = dataBase
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		return err
+	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(time.Hour)
+	if _, err := db.Exec(createSessionTable); err != nil {
+		db.Close()
+		return fmt.Errorf("建表 qrlogin_session 失败：%v", err)
+	}
 	dbInstance = db
-
-	fmt.Println("finish init mysql with ", source)
+	fmt.Printf("MySQL 已连接：%s/%s\n", cfg.Addr, dataBase)
 	return nil
 }
 
-// Get ...
-func Get() *gorm.DB {
+// Get 返回连接池
+func Get() *sql.DB {
 	return dbInstance
 }
+
+// 扫码会话表。时间一律用数据库的 UTC_TIMESTAMP(3) 写和比较，多个实例之间不受各自时钟影响。
+const createSessionTable = `CREATE TABLE IF NOT EXISTS qrlogin_session (
+  state        CHAR(32)     NOT NULL COMMENT '会话号，即小程序码的 scene',
+  status       VARCHAR(16)  NOT NULL COMMENT 'waiting / scanned / done',
+  env_version  VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '出码时的小程序版本',
+  created_at   DATETIME(3)  NOT NULL,
+  expires_at   DATETIME(3)  NOT NULL,
+  scanned_at   DATETIME(3)  NULL,
+  done_at      DATETIME(3)  NULL,
+  phone_masked VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '只存打码后的号码',
+  country_code VARCHAR(8)   NOT NULL DEFAULT '',
+  openid_tail  VARCHAR(16)  NOT NULL DEFAULT '',
+  last_error   VARCHAR(512) NOT NULL DEFAULT '',
+  PRIMARY KEY (state),
+  KEY idx_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='扫码手机号登录联调测试的会话'`

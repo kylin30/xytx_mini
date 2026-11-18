@@ -1,0 +1,14 @@
+{
+  "pages": [
+    "pages/qrlogin/index"
+  ],
+  "window": {
+    "backgroundColor": "#EDEDED",
+    "navigationBarBackgroundColor": "#EDEDED",
+    "navigationBarTitleText": "手机号登录",
+    "navigationBarTextStyle": "black"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

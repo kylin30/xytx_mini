@@ -1,119 +1,44 @@
-# wxcloudrun-golang
-[![GitHub license](https://img.shields.io/github/license/WeixinCloud/wxcloudrun-express)](https://github.com/WeixinCloud/wxcloudrun-express)
-![GitHub package.json dependency version (prod)](https://img.shields.io/badge/golang-1.17.1-green)
+# xytx_mini：扫码手机号登录联调测试
 
-微信云托管 golang 模版，实现简单的计数器读写接口，使用云托管 MySQL 读写、记录计数值。
+基于微信云托管 golang 模板，把计数器换成「电脑出码 → 手机微信扫码 → 小程序手机号快速验证 → 电脑拿到手机号」的联调测试。只用于验证能力，不是正式服务。会话存在云托管 MySQL 的 `qrlogin_session` 表里，多个实例共用，实例数不用限制。
 
-![](https://qcloudimg.tencent-cloud.cn/raw/be22992d297d1b9a1a5365e606276781.png)
+## 组成
 
+| 部分 | 位置 | 作用 |
+| --- | --- | --- |
+| 网页测试页 | `index.html`（服务根路径 `/`） | 模拟 PC / 网页客户端：选小程序版本、生成小程序码、轮询结果 |
+| 服务端 | `main.go`、`service/`、`db/` | 出码（`getwxacodeunlimit`）、用 code 换手机号（`getuserphonenumber`），都走云托管「开放接口服务」，不需要 AppSecret |
+| 小程序测试工程 | `miniprogram-test/` | 一个页面 `pages/qrlogin/index`：读 scene 里的会话号，点「手机号快速验证」后把 code 交给服务端（不打进镜像） |
 
-## 快速开始
-前往 [微信云托管快速开始页面](https://developers.weixin.qq.com/miniprogram/dev/wxcloudrun/src/basic/guide.html)，选择相应语言的模板，根据引导完成部署。
+## 接口
 
-## 本地调试
-下载代码在本地调试，请参考[微信云托管本地调试指南](https://developers.weixin.qq.com/miniprogram/dev/wxcloudrun/src/guide/debug/)
+| 接口 | 调用方 | 说明 |
+| --- | --- | --- |
+| `POST /api/qrlogin/create` `{envVersion, page}` | 网页 | 生成 32 位会话号和带它的小程序码（data URL），5 分钟有效 |
+| `GET /api/qrlogin/status?state=` | 网页 | 状态 waiting / scanned / done / expired，完成后带打码手机号 |
+| `POST /api/qrlogin/scan` `{state}` | 小程序 | 报告已扫码 |
+| `POST /api/qrlogin/phone` `{state, code}` | 小程序 | 用 code 换手机号；完成或过期的会话不再接受 |
 
-## 实时开发
-代码变动时，不需要重新构建和启动容器，即可查看变动后的效果。请参考[微信云托管实时开发指南](https://developers.weixin.qq.com/miniprogram/dev/wxcloudrun/src/guide/debug/dev.html)
+小程序的两个接口只接受 `wx.cloud.callContainer` 发来的请求（要有 `X-WX-OPENID`）。手机号在所有返回、日志和数据库里都是打码的（`138****8000`）。
 
-## Dockerfile最佳实践
-请参考[如何提高项目构建效率](https://developers.weixin.qq.com/miniprogram/dev/wxcloudrun/src/scene/build/speed.html)
+会话的时间一律用数据库的 `UTC_TIMESTAMP(3)` 写和比较，不受各实例时钟影响；完成用条件更新，同一个会话只会完成一次；每次出码时顺手删掉过期的行。
 
-## 目录结构说明
-~~~
-.
-├── Dockerfile                Dockerfile 文件
-├── LICENSE                   LICENSE 文件
-├── README.md                 README 文件
-├── container.config.json     模板部署「服务设置」初始化配置（二开请忽略）
-├── db                        数据库逻辑目录
-├── go.mod                    go.mod 文件
-├── go.sum                    go.sum 文件
-├── index.html                主页 html 
-├── main.go                   主函数入口
-└── service                   接口服务逻辑目录
-~~~
+## 测试步骤
 
+1. **云托管部署本服务**，然后在控制台：
+   - 开通云托管 MySQL，服务的环境变量里要有 `MYSQL_ADDRESS`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`（模板部署时会自动填）；库名用 `MYSQL_DATABASE`，不填默认 `xytx_mini`。库和表在服务启动时自动创建，连不上数据库服务会启动失败；
+   - 打开**公网访问**，记下默认域名；
+   - 「云调用 → 微信令牌权限配置」加上 `/wxa/getwxacodeunlimit` 和 `/wxa/business/getuserphonenumber`，不加会报 `access_token missing`。
+2. **小程序后台**：「设置 → 服务内容声明 → 用户隐私保护指引」里声明收集手机号，否则按钮回调直接失败。
+3. **小程序工程**：用微信开发者工具导入 `miniprogram-test`，AppID 填企业小程序的；在 `miniprogram/app.js` 填 `CLOUD_ENV`（云托管环境 ID）和 `CLOUD_SERVICE`（服务名）。
+4. 两种测法：
+   - **真扫码**：开发者工具「上传」成开发版本（不影响线上版）。浏览器打开云托管公网域名，选「开发版」，生成二维码，用项目成员的微信扫码，点「手机号快速验证」，网页上应显示打码手机号和用时。
+   - **不上传**：网页上生成二维码后复制会话号，开发者工具编译模式「扫码登录测试」把启动参数改成 `scene=会话号`，再点「预览」用手机扫开发者工具给的预览码。
 
-## 服务 API 文档
+## 费用
 
-### `GET /api/count`
+每次按钮回调成功扣一次（0.03 元/次，2023 年公告价，以小程序后台「付费管理」为准）；每个小程序有 1000 次体验额度，开发版、体验版、正式版共用。服务端换号失败不会另外扣费。
 
-获取当前计数
+## 本地联调
 
-#### 请求参数
-
-无
-
-#### 响应结果
-
-- `code`：错误码
-- `data`：当前计数值
-
-##### 响应结果示例
-
-```json
-{
-  "code": 0,
-  "data": 42
-}
-```
-
-#### 调用示例
-
-```
-curl https://<云托管服务域名>/api/count
-```
-
-
-
-### `POST /api/count`
-
-更新计数，自增或者清零
-
-#### 请求参数
-
-- `action`：`string` 类型，枚举值
-  - 等于 `"inc"` 时，表示计数加一
-  - 等于 `"clear"` 时，表示计数重置（清零）
-
-##### 请求参数示例
-
-```
-{
-  "action": "inc"
-}
-```
-
-#### 响应结果
-
-- `code`：错误码
-- `data`：当前计数值
-
-##### 响应结果示例
-
-```json
-{
-  "code": 0,
-  "data": 42
-}
-```
-
-#### 调用示例
-
-```
-curl -X POST -H 'content-type: application/json' -d '{"action": "inc"}' https://<云托管服务域名>/api/count
-```
-
-## 使用注意
-如果不是通过微信云托管控制台部署模板代码，而是自行复制/下载模板代码后，手动新建一个服务并部署，需要在「服务设置」中补全以下环境变量，才可正常使用，否则会引发无法连接数据库，进而导致部署失败。
-- MYSQL_ADDRESS
-- MYSQL_PASSWORD
-- MYSQL_USERNAME
-以上三个变量的值请按实际情况填写。如果使用云托管内MySQL，可以在控制台MySQL页面获取相关信息。
-
-
-
-## License
-
-[MIT](./LICENSE)
+`WX_API_BASE` 可以把微信接口指到模拟服务，只用于本地联调，线上不要设置。

@@ -1,0 +1,22 @@
+<view class="page">
+  <view class="title">电脑端请求用手机号登录</view>
+
+  <view wx:if="{{!state}}" class="tip err">没有会话号：请用微信扫网页上的二维码进入，或在开发者工具的编译模式里填启动参数 scene=会话号。</view>
+
+  <block wx:elif="{{phase === 'done'}}">
+    <view class="tip ok">验证成功，电脑端将自动登录</view>
+    <view class="phone">{{phoneMasked}}</view>
+  </block>
+
+  <block wx:elif="{{phase === 'expired'}}">
+    <view class="tip err">二维码已失效，请在电脑上重新生成后再扫。</view>
+  </block>
+
+  <block wx:else>
+    <view class="tip">点击下方按钮，在微信弹窗中确认手机号。新号码会自动注册。</view>
+    <button class="btn" type="primary" open-type="getPhoneNumber" bindgetphonenumber="onGetPhoneNumber" loading="{{busy}}" disabled="{{busy}}">手机号快速验证</button>
+  </block>
+
+  <view wx:if="{{error}}" class="tip err">{{error}}</view>
+  <view class="foot">会话号 {{state || '无'}}</view>
+</view>

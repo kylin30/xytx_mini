@@ -1,0 +1,31 @@
+{
+  "description": "扫码手机号登录联调测试。导入微信开发者工具时把 appid 换成你的企业小程序 AppID。",
+  "miniprogramRoot": "miniprogram/",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "qrlogin-phone-test",
+  "libVersion": "3.13.1",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "minified": true
+  },
+  "condition": {
+    "miniprogram": {
+      "list": [
+        {
+          "name": "扫码登录测试（把 scene 换成网页上的会话号）",
+          "pathName": "pages/qrlogin/index",
+          "query": "scene=00000000000000000000000000000000",
+          "launchMode": "default",
+          "scene": null
+        }
+      ]
+    }
+  },
+  "editorSetting": {
+    "tabIndent": "insertSpaces",
+    "tabSize": 2
+  }
+}
